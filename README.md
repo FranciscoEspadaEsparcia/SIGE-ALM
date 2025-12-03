@@ -1,7 +1,7 @@
 # SIGE-ALM – Sistema Integral de Gestión de Almacén
 
 **Autor:** Francisco Espada Esparcia  
-**Asignatura:** 47GIIN – Proyectos de Ingeniería del Software (VIU)
+**Asignatura:** 47GIIN – Proyectos de Ingeniería del Software (VIU)  y 45GIIN Sistemas de Información Web (VIU)
 
 ## 📘 Descripción
 SIGE-ALM es un sistema para la gestión de almacenes: artículos, movimientos de stock, órdenes de trabajo, alertas y usuarios.  
