@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+/* Paleta militar */
+:root{
+  --color-bg: #0b1220;
+  --color-panel: #0f1a2b;
+  --color-border: #1f2a3d;
+  --color-text: #e6edf3;
+  --color-muted: #9fb0c0;
+  --color-accent: #7aa65a;
+  --color-accent2: #c2a85d;
+}
