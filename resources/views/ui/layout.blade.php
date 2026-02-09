@@ -18,17 +18,41 @@
         </button>
 
         <div class="collapse navbar-collapse" id="nav">
-            <ul class="navbar-nav ms-auto">
-                <li class="nav-item"><a class="nav-link" href="/ui">Inicio</a></li>
-                <li class="nav-item"><a class="nav-link" href="/ui/articulos">Artículos</a></li>
-                <li class="nav-item"><a class="nav-link" href="/ui/ots">OTs</a></li>
-                <li class="nav-item"><a class="nav-link" href="/ui/movimientos">Movimientos</a></li>
+            <ul class="navbar-nav ms-auto align-items-lg-center">
+
+                <li class="nav-item">
+                    <a class="nav-link" href="/ui">Inicio</a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" href="/ui/articulos">Artículos</a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" href="/ui/ots">OTs</a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" href="/ui/movimientos">Movimientos</a>
+                </li>
+
+                {{-- LOGOUT --}}
+                <li class="nav-item ms-lg-3">
+                    <form method="POST" action="{{ route('logout') }}">
+                        @csrf
+                        <button type="submit" class="btn btn-sm btn-outline-light">
+                            Salir
+                        </button>
+                    </form>
+                </li>
+
             </ul>
         </div>
     </div>
 </nav>
 
 <main class="container py-4">
+
     @if(session('status'))
         <div class="alert alert-success">{{ session('status') }}</div>
     @endif

@@ -5,64 +5,93 @@ use App\Http\Controllers\UiController;
 
 /*
 |--------------------------------------------------------------------------
-| Web Routes
+| HOME
 |--------------------------------------------------------------------------
 */
+Route::get('/', fn () => redirect('/ui'));
 
-Route::get('/', function () {
-    return redirect('/ui'); // evita romper "/" si alguna vista antigua usa @vite
+/*
+|--------------------------------------------------------------------------
+| DASHBOARD (Breeze)
+|--------------------------------------------------------------------------
+| Breeze redirige a route('dashboard') tras login.
+| Mantenemos la ruta y la redirigimos a /ui.
+*/
+Route::middleware('auth')->get('/dashboard', fn () => redirect('/ui'))->name('dashboard');
+
+/*
+|--------------------------------------------------------------------------
+| UI (PROTEGIDA POR LOGIN)
+|--------------------------------------------------------------------------
+*/
+Route::middleware('auth')->group(function () {
+
+    // Dashboard real de tu app
+    Route::get('/ui', [UiController::class, 'dashboard'])->name('ui.dashboard');
+
+    /*
+    |--------------------------------------------------------------------------
+    | UI - Artículos
+    |--------------------------------------------------------------------------
+    */
+    Route::get('/ui/articulos', [UiController::class, 'articulos'])->name('ui.articulos.index');
+    Route::get('/ui/articulos/crear', [UiController::class, 'articuloCreate'])->name('ui.articulos.create');
+    Route::post('/ui/articulos', [UiController::class, 'articuloStore'])->name('ui.articulos.store');
+
+    Route::get('/ui/articulos/{id}', [UiController::class, 'articuloShow'])->name('ui.articulos.show');
+    Route::get('/ui/articulos/{id}/editar', [UiController::class, 'articuloEdit'])->name('ui.articulos.edit');
+    Route::post('/ui/articulos/{id}/editar', [UiController::class, 'articuloUpdate'])->name('ui.articulos.update');
+    Route::post('/ui/articulos/{id}/eliminar', [UiController::class, 'articuloDestroy'])->name('ui.articulos.destroy');
+    Route::post('/ui/articulos/{id}/reactivar', [UiController::class, 'articuloReactivar'])->name('ui.articulos.reactivar');
+
+    /*
+    |--------------------------------------------------------------------------
+    | UI - Órdenes de trabajo
+    |--------------------------------------------------------------------------
+    */
+    Route::get('/ui/ots', [UiController::class, 'ots'])->name('ui.ots.index');
+    Route::get('/ui/ots/crear', [UiController::class, 'otCreateForm'])->name('ui.ots.create');
+    Route::post('/ui/ots', [UiController::class, 'otStore'])->name('ui.ots.store');
+    Route::get('/ui/ots/{id}', [UiController::class, 'otShow'])->name('ui.ots.show');
+
+    Route::match(['POST','PATCH'], '/ui/ots/{id}/estado', [UiController::class, 'otUpdateEstado'])->name('ui.ots.estado');
+    Route::post('/ui/ots/{id}/consumir', [UiController::class, 'otConsumir'])->name('ui.ots.consumir');
+
+    /*
+    |--------------------------------------------------------------------------
+    | UI - Movimientos
+    |--------------------------------------------------------------------------
+    */
+    Route::get('/ui/movimientos', [UiController::class, 'movimientos'])->name('ui.movimientos.index');
+    Route::post('/ui/movimientos/entrada', [UiController::class, 'movEntrada'])->name('ui.movimientos.entrada');
+    Route::post('/ui/movimientos/salida', [UiController::class, 'movSalida'])->name('ui.movimientos.salida');
+    Route::post('/ui/movimientos/devolucion', [UiController::class, 'movDevolucion'])->name('ui.movimientos.devolucion');
+
+    /*
+    |--------------------------------------------------------------------------
+    | UI - ZONA RESTRINGIDA POR ROL (ADMIN = id_rol 1)
+    |--------------------------------------------------------------------------
+    | Reportes + Alertas solo para rol 1.
+    */
+    Route::middleware('role:1')->group(function () {
+        // Reportes (obligatorios)
+        Route::get('/ui/reportes/inventario', [UiController::class, 'reporteInventario'])->name('ui.reportes.inventario');
+        Route::get('/ui/reportes/movimientos', [UiController::class, 'reporteMovimientos'])->name('ui.reportes.movimientos');
+
+        // Alertas
+        Route::get('/ui/alertas', [UiController::class, 'alertasIndex'])->name('ui.alertas.index');
+        Route::post('/ui/alertas/{id}/atender', [UiController::class, 'alertaAtender'])->name('ui.alertas.atender');
+    });
 });
 
-Route::get('/ui', [UiController::class, 'dashboard']);
-
 /*
 |--------------------------------------------------------------------------
-| UI - Artículos (CRUD vía API)
-|--------------------------------------------------------------------------
-*/
-Route::get('/ui/articulos', [UiController::class, 'articulos']);
-Route::get('/ui/articulos/crear', [UiController::class, 'articuloCreate']);
-Route::post('/ui/articulos', [UiController::class, 'articuloStore']);
-
-Route::get('/ui/articulos/{id}', [UiController::class, 'articuloShow']);
-Route::get('/ui/articulos/{id}/editar', [UiController::class, 'articuloEdit']);
-Route::post('/ui/articulos/{id}/editar', [UiController::class, 'articuloUpdate']); // POST simple
-Route::post('/ui/articulos/{id}/eliminar', [UiController::class, 'articuloDestroy']); // POST simple
-Route::post('/ui/articulos/{id}/reactivar', [UiController::class, 'articuloReactivar']);
-
-
-/*
-|--------------------------------------------------------------------------
-| UI - Órdenes de trabajo (ya lo tienes)
-|--------------------------------------------------------------------------
-*/
-Route::get('/ui/ots', [UiController::class, 'ots']);
-Route::get('/ui/ots/crear', [UiController::class, 'otCreateForm']);
-Route::post('/ui/ots', [UiController::class, 'otStore']);
-Route::get('/ui/ots/{id}', [UiController::class, 'otShow']);
-Route::patch('/ui/ots/{id}/estado', [UiController::class, 'otUpdateEstado']);
-Route::post('/ui/ots/{id}/estado', [UiController::class, 'otUpdateEstado']);
-
-/*
-|--------------------------------------------------------------------------
-| UI - Movimientos (ya lo tienes)
-|--------------------------------------------------------------------------
-*/
-Route::get('/ui/movimientos', [UiController::class, 'movimientos']);
-Route::post('/ui/movimientos/entrada', [UiController::class, 'movEntrada']);
-Route::post('/ui/movimientos/salida', [UiController::class, 'movSalida']);
-Route::post('/ui/movimientos/devolucion', [UiController::class, 'movDevolucion']);
-Route::post('/ui/ots/{id}/consumir', [UiController::class, 'otConsumir']);
-
-
-/*
-|--------------------------------------------------------------------------
-| AP4 - pantallas mínimas (mantener para la Actividad IV)
+| AP4 - pantallas mínimas (Actividad IV) - SIN LOGIN
 |--------------------------------------------------------------------------
 */
 Route::prefix('ap4')->group(function () {
-    Route::get('/', fn() => view('ap4.home'));
-    Route::get('/login', fn() => view('ap4.login'));
+    Route::get('/', fn () => view('ap4.home'));
+    Route::get('/login', fn () => view('ap4.login'));
 
     Route::get('/articulos', function () {
         $articulos = [
@@ -73,6 +102,13 @@ Route::prefix('ap4')->group(function () {
         return view('ap4.articulos', compact('articulos'));
     });
 
-    Route::get('/articulos/crear', fn() => view('ap4.crear'));
-    Route::post('/articulos/crear', fn() => redirect('/ap4/articulos')->with('status', 'Artículo creado correctamente (simulado).'));
+    Route::get('/articulos/crear', fn () => view('ap4.crear'));
+    Route::post('/articulos/crear', fn () => redirect('/ap4/articulos')->with('status', 'Artículo creado correctamente (simulado).'));
 });
+
+/*
+|--------------------------------------------------------------------------
+| AUTH ROUTES (Breeze)
+|--------------------------------------------------------------------------
+*/
+require __DIR__.'/auth.php';

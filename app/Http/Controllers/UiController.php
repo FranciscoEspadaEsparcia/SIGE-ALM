@@ -4,396 +4,379 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\DB;
 use App\Models\Categoria;
 use App\Models\Proveedor;
 use App\Models\Articulo;
 use App\Models\OrdenTrabajo;
 use App\Models\Movimiento;
 use App\Models\Usuario;
-use Illuminate\Support\Facades\DB;
-
-
-
-
 
 class UiController extends Controller
 {
-    private function api()
-    {
-        return Http::acceptJson();
-    }
-
-    private function apiFailToErrors($res)
-    {
-        $json = $res->json();
-        return $json['errors'] ?? ['api' => $json['message'] ?? 'Error API'];
-    }
+    /*
+    |--------------------------------------------------------------------------
+    | DASHBOARD
+    |--------------------------------------------------------------------------
+    */
 
     public function dashboard()
     {
-        return view('ui.dashboard');
+        $articulosBajoMinimo = Articulo::where('activo', 1)
+            ->whereColumn('stock_actual', '<', 'stock_minimo')
+            ->count();
+
+        $movimientosHoy = Movimiento::whereDate('fecha_hora', now()->toDateString())
+            ->count();
+
+        $otsAbiertas = OrdenTrabajo::whereIn('estado', ['PENDIENTE', 'EN_CURSO'])
+            ->count();
+
+        $alertasPendientes = DB::table('alertas_stock')
+            ->whereRaw("TRIM(UPPER(estado)) = 'PENDIENTE'")
+            ->count();
+
+        $ultimasAlertas = DB::table('alertas_stock as a')
+            ->join('articulos as ar', 'ar.id', '=', 'a.id_articulo')
+            ->select(
+                'a.id',
+                'a.fecha_hora',
+                'a.stock_actual',
+                'a.stock_minimo',
+                'ar.codigo as articulo_codigo',
+                'ar.nombre as articulo_nombre'
+            )
+            ->whereRaw("TRIM(UPPER(a.estado)) = 'PENDIENTE'")
+            ->orderByDesc('a.fecha_hora')
+            ->limit(5)
+            ->get();
+
+        return view('ui.dashboard', compact(
+            'articulosBajoMinimo',
+            'movimientosHoy',
+            'otsAbiertas',
+            'alertasPendientes',
+            'ultimasAlertas'
+        ));
     }
 
     /*
     |--------------------------------------------------------------------------
-    | ARTÍCULOS (UI -> API)
+    | ALERTAS
     |--------------------------------------------------------------------------
     */
 
-public function articulos(Request $request)
-{
-    $q = $request->query('q');
-    $showInactive = $request->query('show_inactive') === '1';
+    public function alertas()
+    {
+        $alertas = DB::table('alertas_stock as a')
+            ->join('articulos as ar', 'ar.id', '=', 'a.id_articulo')
+            ->select(
+                'a.id',
+                'a.fecha_hora',
+                'a.stock_actual',
+                'a.stock_minimo',
+                'a.estado',
+                'ar.codigo as articulo_codigo',
+                'ar.nombre as articulo_nombre'
+            )
+            ->whereRaw("TRIM(UPPER(a.estado)) = 'PENDIENTE'")
+            ->orderByDesc('a.fecha_hora')
+            ->paginate(20);
 
-    $query = \App\Models\Articulo::query()->orderBy('id', 'desc');
-
-    // Por defecto, ocultamos inactivos
-    if (!$showInactive) {
-        $query->where('activo', 1);
+        return view('ui.alertas.index', compact('alertas'));
     }
 
-    if ($q) {
-        $query->where(function($qq) use ($q) {
-            $qq->where('codigo', 'like', "%{$q}%")
-               ->orWhere('nombre', 'like', "%{$q}%");
-        });
+    public function alertasMarcarAtendidas(Request $request)
+    {
+        $ids = $request->input('ids', []);
+
+        if (empty($ids)) {
+            return back()->with('status', 'No se seleccionaron alertas.');
+        }
+
+        DB::table('alertas_stock')
+            ->whereIn('id', $ids)
+            ->update([
+                'estado' => 'ATENDIDA',
+                'updated_at' => now(),
+            ]);
+
+        return redirect('/ui/alertas')
+            ->with('status', 'Alertas marcadas como atendidas.');
     }
-
-    $articulos = $query->paginate(10)->withQueryString();
-
-    return view('ui.articulos.index', [
-        'articulos' => $articulos,
-        'q' => $q,
-        'showInactive' => $showInactive,
-    ]);
-}
-
-
-
-public function articuloShow($id)
-{
-    $articulo = Articulo::with(['categoria','proveedorPreferente'])->findOrFail($id);
-    return view('ui.articulos.show', compact('articulo'));
-}
-
-
-
-   public function articuloCreate()
-{
-    // NO llamar a la API por HTTP (timeout en artisan serve)
-    $categorias = Categoria::orderBy('nombre')->get();
-    $proveedores = Proveedor::orderBy('nombre')->get();
-
-    return view('ui.articulos.create', compact('categorias', 'proveedores'));
-}
-
-public function articuloStore(Request $request)
-{
-    $data = $request->validate([
-        'codigo' => ['required','string','max:50'],
-        'nombre' => ['required','string','max:255'],
-        'descripcion' => ['nullable','string','max:2000'],
-        'stock_actual' => ['required','integer','min:0'],
-        'stock_minimo' => ['required','integer','min:0'],
-        'activo' => ['required','in:0,1'],
-        'id_categoria' => ['required','integer'],
-        'id_proveedor_preferente' => ['nullable','integer'],
-    ]);
-
-    $data['activo'] = (int)$data['activo'];
-
-    Articulo::create($data);
-
-    return redirect('/ui/articulos')->with('status', 'Artículo creado correctamente.');
-}
-
-
-   public function articuloEdit($id)
-{
-    $articulo = Articulo::findOrFail($id);
-    $categorias = Categoria::orderBy('nombre')->get();
-    $proveedores = Proveedor::orderBy('nombre')->get();
-
-    return view('ui.articulos.edit', compact('articulo', 'categorias', 'proveedores'));
-}
-
-
-public function articuloUpdate(Request $request, $id)
-{
-    $articulo = Articulo::findOrFail($id);
-
-    $data = $request->validate([
-        'codigo' => ['required','string','max:50'],
-        'nombre' => ['required','string','max:255'],
-        'descripcion' => ['nullable','string','max:2000'],
-        'stock_actual' => ['required','integer','min:0'],
-        'stock_minimo' => ['required','integer','min:0'],
-        'activo' => ['required','in:0,1'],
-        'id_categoria' => ['required','integer'],
-        'id_proveedor_preferente' => ['nullable','integer'],
-    ]);
-
-    $data['activo'] = (int)$data['activo'];
-
-    $articulo->update($data);
-
-    return redirect('/ui/articulos')->with('status', 'Artículo actualizado correctamente.');
-}
-
-
-public function articuloDestroy($id)
-{
-    $articulo = \App\Models\Articulo::findOrFail($id);
-
-    // Borrado lógico: no eliminar físicamente, solo desactivar
-    $articulo->activo = 0;
-    $articulo->save();
-
-    return redirect('/ui/articulos')->with('status', 'Artículo desactivado correctamente.');
-}
-
-
-public function articuloReactivar($id)
-{
-    $articulo = \App\Models\Articulo::findOrFail($id);
-    $articulo->activo = 1;
-    $articulo->save();
-
-    return redirect('/ui/articulos')->with('status', 'Artículo reactivado correctamente.');
-}
-
 
     /*
     |--------------------------------------------------------------------------
-    | OTS (tu código)
+    | ARTÍCULOS
     |--------------------------------------------------------------------------
     */
 
+    public function articulos(Request $request)
+    {
+        $q = $request->query('q');
+        $showInactive = $request->query('show_inactive') === '1';
 
+        $query = Articulo::orderByDesc('id');
 
+        if (!$showInactive) {
+            $query->where('activo', 1);
+        }
 
-public function ots()
-{
-    $ots = OrdenTrabajo::orderByDesc('id')->paginate(10);
-    return view('ui.ots.index', compact('ots'));
-}
+        if ($q) {
+            $query->where(function ($qq) use ($q) {
+                $qq->where('codigo', 'like', "%{$q}%")
+                   ->orWhere('nombre', 'like', "%{$q}%");
+            });
+        }
 
+        $articulos = $query->paginate(10)->withQueryString();
 
-public function otShow($id)
-{
-    $ot = OrdenTrabajo::with(['articulos'])->findOrFail($id);
+        return view('ui.articulos.index', compact('articulos', 'q', 'showInactive'));
+    }
 
-    $movimientos = Movimiento::with(['articulo','usuario'])
-        ->where('id_orden_trabajo', $ot->id)
-        ->orderByDesc('fecha_hora')
-        ->limit(200)
-        ->get();
-
-    return view('ui.ots.show', compact('ot','movimientos'));
-}
-
-
-
-
-
-
-   public function otCreateForm()
-{
-    $articulos = \App\Models\Articulo::where('activo', 1)
-        ->orderBy('nombre')
-        ->get();
-
-    return view('ui.ots.create', compact('articulos'));
-}
-
-
-public function otStore(Request $request)
-{
-    $data = $request->validate([
-        'codigo' => ['required'],
-        'descripcion' => ['required'],
-        'fecha_apertura' => ['required','date'],
-        'estado' => ['required'],
-        'articulos' => ['required','array','min:1'],
-        'articulos.*.id_articulo' => ['required','exists:articulos,id'],
-        'articulos.*.cantidad' => ['required','integer','min:1'],
-    ]);
-
-    $ot = OrdenTrabajo::create([
-        'codigo' => $data['codigo'],
-        'descripcion' => $data['descripcion'],
-        'fecha_apertura' => $data['fecha_apertura'],
-        'estado' => $data['estado'],
-    ]);
-
-    foreach ($data['articulos'] as $a) {
-        $ot->articulos()->attach($a['id_articulo'], [
-            'cantidad' => $a['cantidad']
+    public function articuloCreate()
+    {
+        return view('ui.articulos.create', [
+            'categorias' => Categoria::orderBy('nombre')->get(),
+            'proveedores' => Proveedor::orderBy('nombre')->get(),
         ]);
     }
 
-    return redirect("/ui/ots/{$ot->id}")
-           ->with('ok','Orden de trabajo creada');
-}
+    public function articuloStore(Request $request)
+    {
+        $data = $request->validate([
+            'codigo' => 'required',
+            'nombre' => 'required',
+            'stock_actual' => 'required|integer|min:0',
+            'stock_minimo' => 'required|integer|min:0',
+            'activo' => 'required|in:0,1',
+            'id_categoria' => 'required',
+            'id_proveedor_preferente' => 'nullable',
+        ]);
 
+        Articulo::create($data);
 
-
-  public function otUpdateEstado(Request $request, $id)
-{
-    $data = $request->validate([
-        'estado' => ['required', 'in:PENDIENTE,EN_CURSO,FINALIZADA,ARCHIVADA'],
-    ]);
-
-    $ot = \App\Models\OrdenTrabajo::findOrFail($id);
-    $ot->estado = $data['estado'];
-    $ot->save();
-
-    return back()->with('status', 'Estado actualizado correctamente.');
-}
-public function otConsumir(Request $request, $id)
-{
-    $data = $request->validate([
-        'id_usuario' => ['required','exists:usuarios,id'],
-    ]);
-
-    try {
-        DB::transaction(function () use ($id, $data) {
-            $ot = \App\Models\OrdenTrabajo::with('articulos')->lockForUpdate()->findOrFail($id);
-
-            // Solo permitir consumo si está EN_CURSO o FINALIZADA (ajústalo si quieres)
-            if (!in_array($ot->estado, ['EN_CURSO','FINALIZADA'])) {
-                throw new \RuntimeException("La OT debe estar EN_CURSO o FINALIZADA para consumir stock.");
-            }
-
-            foreach ($ot->articulos as $art) {
-                $cantidad = (int) $art->pivot->cantidad;
-
-                // Bloqueamos el artículo para stock consistente
-                $a = \App\Models\Articulo::lockForUpdate()->findOrFail($art->id);
-
-                if ($a->stock_actual < $cantidad) {
-                    throw new \RuntimeException("Stock insuficiente para {$a->codigo} ({$a->nombre}). Stock: {$a->stock_actual}, requerido: {$cantidad}.");
-                }
-
-                // Crear movimiento SALIDA asociado a la OT
-                \App\Models\Movimiento::create([
-                    'tipo' => 'SALIDA',
-                    'cantidad' => $cantidad,
-                    'fecha_hora' => now(),
-                    'id_articulo' => $a->id,
-                    'id_usuario' => $data['id_usuario'],
-                    'id_orden_trabajo' => $ot->id,
-                    'id_albaran' => null,
-                ]);
-
-                // Restar stock
-                $a->stock_actual = $a->stock_actual - $cantidad;
-                $a->save();
-            }
-        });
-    } catch (\RuntimeException $e) {
-        return back()->withErrors(['stock' => $e->getMessage()]);
+        return redirect('/ui/articulos')->with('status', 'Artículo creado.');
     }
-
-    return back()->with('status', 'Consumo registrado: salidas generadas y stock actualizado.');
-}
-
-
 
     /*
     |--------------------------------------------------------------------------
-    | MOVIMIENTOS (tu código)
+    | ÓRDENES DE TRABAJO
     |--------------------------------------------------------------------------
     */
 
-public function movimientos(Request $request)
-{
-    $articulos = Articulo::where('activo', 1)->orderBy('nombre')->get();
-    $usuarios = Usuario::where('activo', 1)->orderBy('nombre')->get();
-    $ots = OrdenTrabajo::orderByDesc('id')->limit(200)->get();
-
-    $idArticulo = $request->query('id_articulo');
-
-    $historial = collect();
-    if ($idArticulo) {
-        $historial = Movimiento::with(['usuario','ordenTrabajo'])
-            ->where('id_articulo', $idArticulo)
-            ->orderByDesc('fecha_hora')
-            ->limit(50)
-            ->get();
+    public function ots()
+    {
+        return view('ui.ots.index', [
+            'ots' => OrdenTrabajo::orderByDesc('id')->paginate(10)
+        ]);
     }
 
-    return view('ui.movimientos.index', [
-        'articulos' => $articulos,
-        'usuarios' => $usuarios,
-        'ots' => $ots,
-        'id_articulo' => $idArticulo,
-        'historial' => $historial,
-    ]);
-}
+    public function otCreateForm()
+    {
+        return view('ui.ots.create', [
+            'articulos' => Articulo::where('activo', 1)->orderBy('nombre')->get()
+        ]);
+    }
 
-public function movEntrada(Request $request)
-{
-    return $this->registrarMovimientoConStock('ENTRADA', $request);
-}
+    public function otStore(Request $request)
+    {
+        $data = $request->validate([
+            'codigo' => 'required',
+            'descripcion' => 'required',
+            'fecha_apertura' => 'required|date',
+            'estado' => 'required',
+            'articulos' => 'required|array|min:1',
+            'articulos.*.id_articulo' => 'required|exists:articulos,id',
+            'articulos.*.cantidad' => 'required|integer|min:1',
+        ]);
 
-public function movSalida(Request $request)
-{
-    return $this->registrarMovimientoConStock('SALIDA', $request);
-}
+        $ot = OrdenTrabajo::create($data);
 
-public function movDevolucion(Request $request)
-{
-    return $this->registrarMovimientoConStock('DEVOLUCION', $request);
-}
+        foreach ($data['articulos'] as $a) {
+            $ot->articulos()->attach($a['id_articulo'], ['cantidad' => $a['cantidad']]);
+        }
 
-private function registrarMovimientoConStock(string $tipo, Request $request)
-{
-    $data = $request->validate([
-        'id_articulo' => ['required','exists:articulos,id'],
-        'id_usuario' => ['required','exists:usuarios,id'],
-        'cantidad' => ['required','integer','min:1'],
-        'id_orden_trabajo' => ['nullable','exists:ordenes_trabajo,id'],
-        'id_albaran' => ['nullable','integer'],
-    ]);
+        return redirect("/ui/ots/{$ot->id}");
+    }
 
-    try {
+    /*
+    |--------------------------------------------------------------------------
+    | MOVIMIENTOS
+    |--------------------------------------------------------------------------
+    */
+
+    public function movimientos(Request $request)
+    {
+        return view('ui.movimientos.index', [
+            'articulos' => Articulo::where('activo', 1)->get(),
+            'usuarios' => Usuario::where('activo', 1)->get(),
+            'ots' => OrdenTrabajo::orderByDesc('id')->limit(200)->get(),
+            'historial' => collect(),
+        ]);
+    }
+
+    public function movEntrada(Request $request)
+    {
+        return $this->registrarMovimiento('ENTRADA', $request);
+    }
+
+    public function movSalida(Request $request)
+    {
+        return $this->registrarMovimiento('SALIDA', $request);
+    }
+
+    public function movDevolucion(Request $request)
+    {
+        return $this->registrarMovimiento('DEVOLUCION', $request);
+    }
+
+    private function registrarMovimiento(string $tipo, Request $request)
+    {
+        $data = $request->validate([
+            'id_articulo' => 'required|exists:articulos,id',
+            'id_usuario' => 'required|exists:usuarios,id',
+            'cantidad' => 'required|integer|min:1',
+        ]);
+
         DB::transaction(function () use ($tipo, $data) {
             $art = Articulo::lockForUpdate()->findOrFail($data['id_articulo']);
 
-            $delta = match($tipo) {
-                'ENTRADA' => +$data['cantidad'],
-                'DEVOLUCION' => +$data['cantidad'],
-                'SALIDA' => -$data['cantidad'],
-                default => 0
-            };
+            $delta = $tipo === 'SALIDA' ? -$data['cantidad'] : $data['cantidad'];
+            $art->stock_actual += $delta;
 
-            $nuevo = $art->stock_actual + $delta;
-
-            if ($nuevo < 0) {
-                throw new \RuntimeException("Stock insuficiente. Stock actual: {$art->stock_actual}, salida: {$data['cantidad']}.");
+            if ($art->stock_actual < 0) {
+                throw new \RuntimeException('Stock insuficiente');
             }
 
             Movimiento::create([
                 'tipo' => $tipo,
                 'cantidad' => $data['cantidad'],
                 'fecha_hora' => now(),
-                'id_articulo' => $data['id_articulo'],
+                'id_articulo' => $art->id,
                 'id_usuario' => $data['id_usuario'],
-                'id_orden_trabajo' => $data['id_orden_trabajo'] ?? null,
-                'id_albaran' => $data['id_albaran'] ?? null,
             ]);
 
-            $art->stock_actual = $nuevo;
             $art->save();
+
+            if ($tipo === 'SALIDA') {
+                $this->generarAlertaStockSiProcede($art);
+            }
         });
-    } catch (\RuntimeException $e) {
-        return back()->withErrors(['stock' => $e->getMessage()])->withInput();
+
+        return back()->with('status', "Movimiento {$tipo} registrado.");
     }
 
-    return redirect('/ui/movimientos?id_articulo=' . $data['id_articulo'])
-        ->with('status', "Movimiento {$tipo} registrado y stock actualizado.");
+    private function generarAlertaStockSiProcede(Articulo $art)
+    {
+        if ($art->stock_actual >= $art->stock_minimo) return;
+
+        $existe = DB::table('alertas_stock')
+            ->where('id_articulo', $art->id)
+            ->whereRaw("TRIM(UPPER(estado)) = 'PENDIENTE'")
+            ->exists();
+
+        if (!$existe) {
+            DB::table('alertas_stock')->insert([
+                'id_articulo' => $art->id,
+                'stock_actual' => $art->stock_actual,
+                'stock_minimo' => $art->stock_minimo,
+                'estado' => 'PENDIENTE',
+                'fecha_hora' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | REPORTES
+    |--------------------------------------------------------------------------
+    */
+
+    public function reporteInventario()
+    {
+        return view('ui.reportes.inventario', [
+            'articulos' => Articulo::with(['categoria', 'proveedorPreferente'])->get()
+        ]);
+    }
+
+public function reporteMovimientos(Request $request)
+{
+    $desde = $request->query('desde');
+    $hasta = $request->query('hasta');
+    $tipo  = $request->query('tipo'); // ENTRADA|SALIDA|DEVOLUCION (opcional)
+
+    $q = Movimiento::with(['articulo', 'usuario', 'ordenTrabajo'])
+        ->orderByDesc('fecha_hora');
+
+    if (!empty($tipo)) {
+        $q->where('tipo', $tipo);
+    }
+
+    // Filtro fecha robusto para DATETIME
+    if (!empty($desde)) {
+        $q->where('fecha_hora', '>=', $desde . ' 00:00:00');
+    }
+    if (!empty($hasta)) {
+        $q->where('fecha_hora', '<=', $hasta . ' 23:59:59');
+    }
+
+    $movimientos = $q->limit(500)->get();
+
+    return view('ui.reportes.movimientos', compact('movimientos', 'desde', 'hasta', 'tipo'));
 }
 
+
+
+
+        /*
+    |--------------------------------------------------------------------------
+    | ALERTAS (UI)
+    |--------------------------------------------------------------------------
+    */
+
+    public function alertasIndex(Request $request)
+    {
+        // filtros opcionales
+        $estado = $request->query('estado', 'PENDIENTE'); // PENDIENTE | ATENDIDA | TODAS
+
+        $q = DB::table('alertas_stock as a')
+            ->join('articulos as ar', 'ar.id', '=', 'a.id_articulo')
+            ->select(
+                'a.id',
+                'a.fecha_hora',
+                'a.stock_actual',
+                'a.stock_minimo',
+                'a.estado',
+                'ar.codigo as articulo_codigo',
+                'ar.nombre as articulo_nombre'
+            )
+            ->orderByDesc('a.fecha_hora');
+
+        if ($estado === 'PENDIENTE') {
+            $q->whereRaw("TRIM(UPPER(a.estado)) = 'PENDIENTE'");
+        } elseif ($estado === 'ATENDIDA') {
+            $q->whereRaw("TRIM(UPPER(a.estado)) = 'ATENDIDA'");
+        } // TODAS => sin filtro
+
+        $alertas = $q->paginate(20)->withQueryString();
+
+        return view('ui.alertas.index', compact('alertas', 'estado'));
+    }
+
+    public function alertaAtender($id)
+    {
+        // marcamos como ATENDIDA
+        DB::table('alertas_stock')
+            ->where('id', $id)
+            ->update([
+                'estado' => 'ATENDIDA',
+                'updated_at' => now(),
+            ]);
+
+        return back()->with('status', 'Alerta marcada como atendida.');
+    }
 
 }

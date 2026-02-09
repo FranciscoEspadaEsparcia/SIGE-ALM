@@ -2,11 +2,28 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-class Usuario extends Model
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+
+class Usuario extends Authenticatable
 {
-     use HasFactory;
+    use Notifiable;
+
     protected $table = 'usuarios';
 
+    protected $fillable = [
+        'username', 'password', 'nombre', 'email', 'activo', 'id_rol'
+    ];
+
+    protected $hidden = [
+        'password',
+        'remember_token',
+    ];
+
+    public $timestamps = false;
+
+   
+    protected $casts = [
+        'activo' => 'boolean',
+    ];
 }

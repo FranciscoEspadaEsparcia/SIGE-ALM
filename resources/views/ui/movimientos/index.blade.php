@@ -3,6 +3,10 @@
 @section('title', 'Movimientos')
 
 @section('content')
+@php
+    $id_articulo = $id_articulo ?? request()->query('id_articulo');
+@endphp
+
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
         <h1 class="h4 mb-0">Movimientos</h1>
